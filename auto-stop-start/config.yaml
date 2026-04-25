@@ -1,0 +1,187 @@
+# ============================================================
+#  Auto Stop/Start Configuration
+# ============================================================
+#
+#  Tag convention used for resource discovery:
+#    auto-schedule: "true"          → opt-in to automation
+#    Environment:   dev|staging|prod
+#
+#  Schedules are evaluated only when --schedule-check is passed.
+#  Timezone strings follow IANA tz database (e.g. Asia/Bangkok).
+# ============================================================
+
+# ── Schedule definitions ─────────────────────────────────────
+schedules:
+  # Weekdays 08:00–20:00 (Asia/Bangkok)
+  office-hours-th:
+    timezone: Asia/Bangkok
+    start:
+      cron: "0 8 * * 1-5"     # Mon–Fri 08:00
+    stop:
+      cron: "0 20 * * 1-5"    # Mon–Fri 20:00
+
+  # Weekdays 08:00–18:00 (UTC)
+  office-hours-utc:
+    timezone: UTC
+    start:
+      cron: "0 8 * * 1-5"
+    stop:
+      cron: "0 18 * * 1-5"
+
+  # Always off (weekend overnight jobs, e.g. dev environments)
+  always-off:
+    timezone: UTC
+    start:
+      cron: "0 8 * * 1-5"
+    stop:
+      cron: "0 18 * * 1-5"
+
+# ── Environment definitions ──────────────────────────────────
+environments:
+
+  # ── dev ─────────────────────────────────────────────────────
+  dev:
+    schedule: office-hours-th   # referenced by --schedule-check
+
+    aws:
+      regions:
+        - us-east-1
+      # IAM: use instance role or AWS_PROFILE / env vars — no hardcoded keys
+      ec2:
+        tag_filters:
+          - key: auto-schedule
+            value: "true"
+          - key: Environment
+            value: dev
+        # Skip instances whose Name tag matches these prefixes
+        exclude_name_prefixes:
+          - "bastion"
+          - "jenkins"
+      rds:
+        tag_filters:
+          - key: auto-schedule
+            value: "true"
+          - key: Environment
+            value: dev
+        # Aurora clusters support stop/start at cluster level
+        include_aurora_clusters: true
+
+    azure:
+      subscription_id: "${AZURE_SUBSCRIPTION_ID}"   # read from env var
+      resource_groups:
+        - rg-dev
+      vm:
+        tag_filters:
+          auto-schedule: "true"
+          Environment: dev
+        exclude_name_prefixes:
+          - "jumpbox"
+      database:
+        tag_filters:
+          auto-schedule: "true"
+          Environment: dev
+        # Supported: postgresql_flexible, mysql_flexible
+        engines:
+          - postgresql_flexible
+          - mysql_flexible
+
+  # ── staging ──────────────────────────────────────────────────
+  staging:
+    schedule: office-hours-utc
+
+    aws:
+      regions:
+        - us-east-1
+        - ap-southeast-1
+      ec2:
+        tag_filters:
+          - key: auto-schedule
+            value: "true"
+          - key: Environment
+            value: staging
+        exclude_name_prefixes: []
+      rds:
+        tag_filters:
+          - key: auto-schedule
+            value: "true"
+          - key: Environment
+            value: staging
+        include_aurora_clusters: true
+
+    azure:
+      subscription_id: "${AZURE_SUBSCRIPTION_ID}"
+      resource_groups:
+        - rg-staging
+      vm:
+        tag_filters:
+          auto-schedule: "true"
+          Environment: staging
+        exclude_name_prefixes: []
+      database:
+        tag_filters:
+          auto-schedule: "true"
+          Environment: staging
+        engines:
+          - postgresql_flexible
+          - mysql_flexible
+
+  # ── prod ─────────────────────────────────────────────────────
+  prod:
+    # Production is NOT scheduled for auto-stop by default.
+    # Remove 'auto-schedule: true' tags from prod resources to protect them.
+    # This config exists for on-demand manual use only.
+    schedule: null
+
+    aws:
+      regions:
+        - us-east-1
+      ec2:
+        tag_filters:
+          - key: auto-schedule
+            value: "true"
+          - key: Environment
+            value: prod
+        exclude_name_prefixes:
+          - "bastion"
+          - "nat"
+          - "vpn"
+      rds:
+        tag_filters:
+          - key: auto-schedule
+            value: "true"
+          - key: Environment
+            value: prod
+        include_aurora_clusters: false   # Aurora stop not recommended in prod
+
+    azure:
+      subscription_id: "${AZURE_SUBSCRIPTION_ID_PROD}"
+      resource_groups:
+        - rg-prod
+      vm:
+        tag_filters:
+          auto-schedule: "true"
+          Environment: prod
+        exclude_name_prefixes:
+          - "jumpbox"
+          - "agw"        # Application Gateway VMs
+      database:
+        tag_filters:
+          auto-schedule: "true"
+          Environment: prod
+        engines:
+          - postgresql_flexible
+
+# ── Notification (optional) ──────────────────────────────────
+notifications:
+  # Webhook (Slack / Teams / generic HTTP POST)
+  webhook:
+    enabled: false
+    url: "${NOTIFY_WEBHOOK_URL}"
+    # On which outcomes to notify: success | error | all
+    on: error
+
+  # AWS SNS
+  sns:
+    enabled: false
+    topic_arn: "${SNS_TOPIC_ARN}"
+    on: error
